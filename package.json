@@ -6,7 +6,6 @@
     "node": "24.x"
   },
   "dependencies": {
-    "javascript-obfuscator": "4.1.1",
-    "luamin": "^1.0.4"
+    "javascript-obfuscator": "4.1.1"
   }
 }
