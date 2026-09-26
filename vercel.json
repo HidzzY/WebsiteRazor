@@ -2,11 +2,13 @@
   "version": 2,
   "builds": [
     { "src": "api/obfuscate.js", "use": "@vercel/node" },
+    { "src": "api/obfuscate-lua.js", "use": "@vercel/node" },
     { "src": "api/obfuscate-all.js", "use": "@vercel/node" },
     { "src": "public/**", "use": "@vercel/static" }
   ],
   "routes": [
     { "handle": "filesystem" },
+    { "src": "/api/obfuscate-lua", "dest": "/api/obfuscate-lua.js" },
     { "src": "/api/obfuscate-all", "dest": "/api/obfuscate-all.js" },
     { "src": "/api/obfuscate", "dest": "/api/obfuscate.js" },
     { "src": "/favicon.ico", "dest": "/public/favicon.ico" },

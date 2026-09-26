@@ -28,6 +28,9 @@ $('run').addEventListener('click', async () => {
         debug: $('debug').checked
       }
     };
+  } else if (lang === 'lua') {
+    endpoint = '/api/obfuscate-lua';
+    body = { code };
   } else {
     endpoint = '/api/obfuscate-all';
     body = { code, lang };
