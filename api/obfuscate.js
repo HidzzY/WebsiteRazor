@@ -1,4 +1,3 @@
-const fetch = require('node-fetch');
 const JavaScriptObfuscator = require('javascript-obfuscator');
 
 module.exports = async (req, res) => {
