@@ -3,27 +3,40 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>JS Obfuscator</title>
+<title>H1Dz Obfuscator</title>
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-<header><h1>JS Obfuscator</h1><span class="tag">v4.1.0</span></header>
+<header><h1>H1Dz Obfuscator</h1><span class="tag">anti-ai</span></header>
 <main>
   <section>
-    <label>Input</label>
-    <textarea id="in" placeholder="// tempel kode JS di sini"></textarea>
+    <label>Mode</label>
+    <select id="lang">
+      <option value="js">JavaScript</option>
+      <option value="lua">Lua (MoonLoader / SAMP)</option>
+      <option value="html">HTML</option>
+      <option value="pwn">PWN</option>
+    </select>
   </section>
-  <section class="opts">
+
+  <section id="jsOpts" class="opts">
     <label><input type="checkbox" id="cff" checked> controlFlowFlattening</label>
     <label><input type="checkbox" id="dead" checked> deadCodeInjection</label>
     <label><input type="checkbox" id="selfDefending" checked> selfDefending</label>
     <label><input type="checkbox" id="debug" checked> debugProtection</label>
   </section>
+
+  <section>
+    <label>Input</label>
+    <textarea id="in" placeholder="// paste kode di sini"></textarea>
+  </section>
+
   <section>
     <button id="run">Obfuscate</button>
     <button id="copy">Copy Output</button>
     <button id="clear">Clear</button>
   </section>
+
   <section>
     <label>Output</label>
     <textarea id="out" readonly></textarea>
